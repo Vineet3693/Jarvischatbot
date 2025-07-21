@@ -3,9 +3,11 @@ import streamlit as st
 import sys
 import os
 
-# Add src directory to path
-sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
+# Add current directory to Python path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, current_dir)
 
+# Import JARVIS components (absolute imports)
 from jarvis_brain import JarvisBrain
 
 # Page configuration
@@ -72,12 +74,10 @@ def main():
         # Quick commands
         st.subheader("⚡ Quick Commands")
         if st.button("👋 Say Hello"):
-            quick_query = "Hello JARVIS"
-            st.session_state.quick_query = quick_query
+            st.session_state.quick_query = "Hello JARVIS"
             
         if st.button("⏰ What time is it?"):
-            quick_query = "What time is it?"
-            st.session_state.quick_query = quick_query
+            st.session_state.quick_query = "What time is it?"
     
     # Main chat interface
     st.subheader("💬 Chat with JARVIS")
@@ -123,6 +123,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
