@@ -1,337 +1,408 @@
 
+"""
+JARVIS AI Assistant - Main Application
+Iron Man Themed AI Assistant powered by Groq
+"""
+
 import streamlit as st
-import datetime
-import random
-from groq import Groq
+import sys
 import os
+import datetime
+from typing import Dict, Any
+
+# Add src directory to path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+src_path = os.path.join(current_dir, 'src')
+sys.path.insert(0, src_path)
+
+# Import JARVIS modules
+try:
+    from jarvis_core import JarvisCore
+    from ui_components import IronManUI
+    from animations import JarvisAnimations
+    from utils import validate_input, generate_conversation_summary
+    from config import JarvisConfig
+except ImportError as e:
+    st.error(f"Failed to import JARVIS modules: {str(e)}")
+    st.stop()
 
 # Page configuration
 st.set_page_config(
-    page_title="JARVIS AI Assistant",
-    page_icon="🤖",
+    page_title=JarvisConfig.APP_TITLE,
+    page_icon=JarvisConfig.APP_ICON,
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
+    menu_items={
+        'Get Help': 'https://github.com/your-repo/jarvis-assistant',
+        'Report a bug': 'https://github.com/your-repo/jarvis-assistant/issues',
+        'About': "JARVIS AI Assistant - Iron Man Style"
+    }
 )
 
-# Custom CSS for JARVIS theme
-st.markdown("""
-<style>
-    .main {
-        background: linear-gradient(135deg, #0c0c0c, #1a1a1a);
-        color: #00ffff;
-    }
-    .stChatMessage {
-        background-color: rgba(0, 255, 255, 0.1);
-        border: 1px solid #00ffff;
-        border-radius: 10px;
-        padding: 10px;
-        margin: 5px 0;
-    }
-    .stSidebar {
-        background-color: #1a1a1a;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-class IntentClassifier:
+class JarvisApp:
+    """Main JARVIS Application Class"""
+    
     def __init__(self):
-        self.intent_keywords = {
-            'greeting': ['hello', 'hi', 'hey', 'good morning', 'good afternoon', 'good evening'],
-            'time': ['time', 'clock', 'what time is it', 'current time'],
-            'date': ['date', 'today', 'what day', 'current date', 'what date'],
-            'simple': ['ok', 'okay', 'yes', 'no', 'thanks', 'thank you', 'bye', 'goodbye']
-        }
-    
-    def classify(self, user_input):
-        user_input_lower = user_input.lower().strip()
-        for intent, keywords in self.intent_keywords.items():
-            for keyword in keywords:
-                if keyword in user_input_lower:
-                    return intent
-        return 'complex'
-
-class BuiltinResponses:
-    def __init__(self):
-        self.responses = {
-            'greeting': [
-                "Hello! I'm JARVIS, your AI assistant. How may I assist you today?",
-                "Good day! JARVIS here, ready to help with whatever you need.",
-                "Greetings! I'm at your service. What can I do for you?",
-                "Hello there! JARVIS reporting for duty. How can I help?"
-            ],
-            'simple': [
-                "Understood. Is there anything else you'd like to know?",
-                "I see. What else would you like to explore?",
-                "Got it! How else may I assist you?",
-                "Very well. What other questions do you have?"
-            ]
-        }
-    
-    def get_response(self, user_input, intent):
-        if intent == 'time':
-            return self._get_current_time()
-        elif intent == 'date':
-            return self._get_current_date()
-        elif intent in self.responses:
-            return random.choice(self.responses[intent])
-        else:
-            return "I'm processing your request. Please wait a moment."
-    
-    def _get_current_time(self):
-        now = datetime.datetime.now()
-        time_str = now.strftime('%I:%M %p')
-        return f"The current time is {time_str}, sir."
-    
-    def _get_current_date(self):
-        now = datetime.datetime.now()
-        date_str = now.strftime('%A, %B %d, %Y')
-        return f"Today is {date_str}."
-
-class GroqHandler:
-    def __init__(self):
-        self.client = None
-        self.api_connected = False
-        self.connection_error = None
+        self.ui = IronManUI()
+        self.animations = JarvisAnimations()
+        self.initialize_session_state()
         
-        # Get API key
-        api_key = self._get_api_key()
+    def initialize_session_state(self):
+        """Initialize session state variables"""
+        if 'jarvis_core' not in st.session_state:
+            st.session_state.jarvis_core = JarvisCore()
         
-        if api_key:
-            try:
-                # Initialize Groq client (simplified - no extra parameters)
-                self.client = Groq(api_key=api_key)
-                self.model = "llama2-70b-4096"
-                
-                # Test the connection
-                self._test_connection()
-                self.api_connected = True
-                st.sidebar.success("✅ Groq API Connected!")
-                
-            except Exception as e:
-                self.connection_error = f"Client initialization failed: {str(e)}"
-                self.api_connected = False
-                st.sidebar.error(f"❌ Connection Error: {str(e)}")
-        else:
-            self.connection_error = "No valid API key found"
-            self.api_connected = False
-            st.sidebar.error("❌ No API key found")
-    
-    def _get_api_key(self):
-        """Get API key from multiple sources"""
-        # Method 1: Streamlit secrets (recommended)
-        try:
-            api_key = st.secrets["GROQ_API_KEY"]
-            if api_key and len(api_key) > 20:
-                st.sidebar.info("🔑 Using key from Streamlit secrets")
-                return api_key
-        except Exception as e:
-            st.sidebar.warning(f"Secrets not found: {str(e)}")
-        
-        # Method 2: Environment variable
-        try:
-            api_key = os.environ.get("GROQ_API_KEY")
-            if api_key and len(api_key) > 20:
-                st.sidebar.info("🔑 Using key from environment")
-                return api_key
-        except:
-            pass
-        
-        # Method 3: Temporary fallback (REPLACE THIS WITH YOUR NEW KEY!)
-        # ⚠️ Remember to create a NEW key since the old one was exposed!
-        api_key = "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"
-        
-        if api_key and len(api_key) > 20:
-            st.sidebar.warning("⚠️ Using hardcoded key (not secure)")
-            return api_key
-        
-        return None
-    
-    def _test_connection(self):
-        """Test API connection with minimal parameters"""
-        try:
-            # Simple test call
-            response = self.client.chat.completions.create(
-                messages=[{"role": "user", "content": "test"}],
-                model=self.model,
-                max_tokens=5
-            )
-            return True
-        except Exception as e:
-            raise Exception(f"API test failed: {str(e)}")
-    
-    def get_response(self, user_input, conversation_history=[]):
-        """Get AI response from Groq"""
-        if not self.api_connected or not self.client:
-            return f"🔧 I'm not connected to my AI brain. Error: {self.connection_error}"
-        
-        try:
-            # Build messages
-            messages = [
-                {
-                    "role": "system",
-                    "content": """You are JARVIS, Tony Stark's AI assistant. You are helpful, intelligent, witty, and professional. Keep responses clear and informative."""
-                }
-            ]
-            
-            # Add conversation context (last 2 exchanges)
-            for conv in conversation_history[-2:]:
-                messages.append({"role": "user", "content": conv['user']})
-                messages.append({"role": "assistant", "content": conv['assistant']})
-            
-            # Add current query
-            messages.append({"role": "user", "content": user_input})
-            
-            # Make API call with minimal parameters
-            response = self.client.chat.completions.create(
-                messages=messages,
-                model=self.model,
-                max_tokens=400,
-                temperature=0.7
-            )
-            
-            return response.choices[0].message.content
-            
-        except Exception as e:
-            return f"I'm experiencing technical difficulties: {str(e)}"
-
-class JarvisBrain:
-    def __init__(self):
-        self.groq = GroqHandler()
-        self.builtin = BuiltinResponses()
-        self.classifier = IntentClassifier()
-        self.conversation_history = []
-    
-    def process_query(self, user_input):
-        try:
-            user_input = user_input.strip()
-            if not user_input:
-                return "I didn't receive any input. Please ask me something!"
-            
-            # Classify intent
-            intent = self.classifier.classify(user_input)
-            
-            # Route to handler
-            if intent in ['time', 'date', 'greeting', 'simple']:
-                response = self.builtin.get_response(user_input, intent)
-            else:
-                response = self.groq.get_response(user_input, self.conversation_history)
-            
-            # Update history
-            self.conversation_history.append({
-                'user': user_input,
-                'assistant': response,
-                'intent': intent
-            })
-            
-            # Keep last 8 exchanges
-            if len(self.conversation_history) > 8:
-                self.conversation_history = self.conversation_history[-8:]
-            
-            return response
-            
-        except Exception as e:
-            return f"I encountered an error: {str(e)}"
-
-def main():
-    # Initialize JARVIS
-    if 'jarvis' not in st.session_state:
-        st.session_state.jarvis = JarvisBrain()
-    
-    if 'messages' not in st.session_state:
-        st.session_state.messages = []
-    
-    # Title
-    st.title("🤖 JARVIS AI Assistant")
-    st.markdown("*Just A Rather Very Intelligent System*")
-    
-    # Sidebar
-    with st.sidebar:
-        st.header("🛠️ JARVIS Controls")
-        
-        # System status
-        st.subheader("📡 System Status")
-        
-        # Show connection status
-        if hasattr(st.session_state.jarvis.groq, 'api_connected'):
-            if st.session_state.jarvis.groq.api_connected:
-                st.success("✅ AI Brain Online")
-                st.info("🧠 Groq Llama 2 Ready")
-            else:
-                st.error("❌ AI Brain Offline")
-        
-        # Message count
-        st.metric("💬 Messages", len(st.session_state.messages))
-        
-        # Controls
-        if st.button("🗑️ Clear Chat", use_container_width=True):
+        if 'messages' not in st.session_state:
             st.session_state.messages = []
-            st.session_state.jarvis.conversation_history = []
+        
+        if 'session_start' not in st.session_state:
+            st.session_state.session_start = datetime.datetime.now()
+        
+        if 'total_queries' not in st.session_state:
+            st.session_state.total_queries = 0
+        
+        if 'last_interaction' not in st.session_state:
+            st.session_state.last_interaction = None
+    
+    def render_header(self):
+        """Render main header with JARVIS branding"""
+        st.markdown("""
+        <div class="main-header" style="text-align: center; margin-bottom: 30px;">
+            <h1 style="
+                background: linear-gradient(90deg, #00ffff, #ff6b35);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+                font-family: 'Orbitron', monospace;
+                font-size: 3.5rem;
+                margin: 0;
+                text-shadow: 0 0 30px rgba(0,255,255,0.5);
+            ">
+                🤖 JARVIS
+            </h1>
+            <p style="
+                color: #00ffff;
+                font-family: 'Rajdhani', sans-serif;
+                font-size: 1.2rem;
+                margin: 10px 0;
+                opacity: 0.8;
+            ">
+                Just A Rather Very Intelligent System
+            </p>
+            <div style="
+                width: 100px;
+                height: 2px;
+                background: linear-gradient(90deg, #00ffff, #ff6b35);
+                margin: 20px auto;
+                border-radius: 1px;
+            "></div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    def render_sidebar(self):
+        """Render enhanced sidebar with system controls"""
+        with st.sidebar:
+            # Arc Reactor Status
+            st.markdown("### ⚡ Arc Reactor")
+            col1, col2 = st.columns([1, 2])
+            
+            with col1:
+                # Mini arc reactor visualization
+                if st.session_state.jarvis_core.system_status['online']:
+                    self.ui.render_arc_reactor("online")
+                else:
+                    self.ui.render_arc_reactor("offline")
+            
+            with col2:
+                # System status
+                stats = st.session_state.jarvis_core.get_system_stats()
+                status_color = "🟢" if stats['status'] == 'Online' else "🔴"
+                st.markdown(f"**Status:** {status_color} {stats['status']}")
+                st.markdown(f"**Uptime:** {stats['uptime']}")
+                st.markdown(f"**Queries:** {stats['total_queries']}")
+            
+            st.markdown("---")
+            
+            # Quick Commands
+            quick_query = self.ui.render_quick_commands()
+            if quick_query:
+                st.session_state.quick_query = quick_query
+            
+            st.markdown("---")
+            
+            # System Controls
+            st.markdown("### 🛠️ System Controls")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("🗑️ Clear Chat", use_container_width=True):
+                    st.session_state.messages = []
+                    st.session_state.jarvis_core.clear_conversation()
+                    st.success("Chat cleared!")
+                    st.rerun()
+            
+            with col2:
+                if st.button("📊 Stats", use_container_width=True):
+                    st.session_state.show_stats = True
+            
+            # Export conversation
+            if st.button("💾 Export Chat", use_container_width=True):
+                if st.session_state.messages:
+                    export_data = st.session_state.jarvis_core.export_conversation()
+                    st.download_button(
+                        label="📥 Download JSON",
+                        data=export_data,
+                        file_name=f"jarvis_conversation_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                        mime="application/json"
+                    )
+                else:
+                    st.warning("No conversation to export!")
+            
+            st.markdown("---")
+            
+            # Advanced Settings
+            with st.expander("⚙️ Advanced Settings"):
+                # Temperature control
+                new_temp = st.slider("AI Temperature", 0.1, 1.0, 0.7, 0.1)
+                if new_temp != JarvisConfig.TEMPERATURE:
+                    JarvisConfig.TEMPERATURE = new_temp
+                    st.success(f"Temperature set to {new_temp}")
+                
+                # Max tokens
+                new_tokens = st.number_input("Max Response Tokens", 100, 1000, 500, 50)
+                if new_tokens != JarvisConfig.MAX_TOKENS:
+                    JarvisConfig.MAX_TOKENS = new_tokens
+                
+                # Enable animations
+                animations_enabled = st.checkbox("Enable Animations", value=True)
+                JarvisConfig.ENABLE_ANIMATIONS = animations_enabled
+            
+            # System Statistics
+            if hasattr(st.session_state, 'show_stats') and st.session_state.show_stats:
+                st.markdown("---")
+                self.render_detailed_stats()
+    
+    def render_detailed_stats(self):
+        """Render detailed system statistics"""
+        st.markdown("### 📈 Detailed Statistics")
+        
+        # Get conversation summary
+        summary = generate_conversation_summary(st.session_state.jarvis_core.conversation_history)
+        
+        # Display metrics
+        st.metric("Total Messages", summary.get('total_messages', 0))
+        st.metric("Session Duration", summary.get('session_duration', '00:00:00'))
+        st.metric("Avg Processing Time", f"{summary.get('avg_processing_time', 0):.3f}s")
+        
+        # Intent distribution
+        if summary.get('intent_distribution'):
+            st.markdown("**Intent Distribution:**")
+            for intent, count in summary['intent_distribution'].items():
+                st.write(f"• {intent.title()}: {count}")
+        
+        # Close stats
+        if st.button("❌ Close Stats"):
+            del st.session_state.show_stats
+            st.rerun()
+    
+    def render_main_chat(self):
+        """Render main chat interface"""
+        # Chat header
+        st.markdown("### 💬 Communication Interface")
+        
+        # Display conversation messages
+        chat_container = st.container()
+        
+        with chat_container:
+            for i, message in enumerate(st.session_state.messages):
+                # Get metadata if available
+                metadata = None
+                if i < len(st.session_state.jarvis_core.conversation_history):
+                    metadata = st.session_state.jarvis_core.conversation_history[i]
+                
+                self.ui.render_chat_message(
+                    role=message["role"],
+                    content=message["content"],
+                    metadata=metadata
+                )
+        
+        # Handle quick queries
+        if hasattr(st.session_state, 'quick_query'):
+            self.process_user_input(st.session_state.quick_query)
+            del st.session_state.quick_query
             st.rerun()
         
-        # Quick tests
-        st.subheader("⚡ Quick Commands")
+        # Chat input
+        if prompt := st.chat_input("Communicate with JARVIS..."):
+            self.process_user_input(prompt)
+    
+    def process_user_input(self, user_input: str):
+        """Process user input and generate response"""
+        # Validate input
+        is_valid, error_message = validate_input(user_input)
+        if not is_valid:
+            st.error(f"Input validation failed: {error_message}")
+            return
         
-        if st.button("👋 Hello", use_container_width=True):
-            st.session_state.quick_query = "Hello JARVIS"
+        # Update counters
+        st.session_state.total_queries += 1
+        st.session_state.last_interaction = datetime.datetime.now()
         
-        if st.button("⏰ Time", use_container_width=True):
-            st.session_state.quick_query = "What time is it?"
+        # Add user message
+        st.session_state.messages.append({"role": "user", "content": user_input})
+        
+        # Display user message immediately
+        self.ui.render_chat_message("user", user_input)
+        
+        # Show processing animation
+        with st.spinner("JARVIS is processing your request..."):
+            # Get response from JARVIS core
+            response, metadata = st.session_state.jarvis_core.process_query(user_input)
+        
+        # Add assistant response
+        st.session_state.messages.append({"role": "assistant", "content": response})
+        
+        # Display assistant response
+        self.ui.render_chat_message("assistant", response, metadata)
+    
+    def render_system_monitor(self):
+        """Render system monitoring panel"""
+        if JarvisConfig.ENABLE_ANIMATIONS:
+            col1, col2 = st.columns([2, 1])
             
-        if st.button("🤖 About AI", use_container_width=True):
-            st.session_state.quick_query = "What is artificial intelligence?"
-        
-        # Debug section
-        with st.expander("🔧 Debug Info"):
-            if st.button("Test Connection"):
-                try:
-                    api_key = st.session_state.jarvis.groq._get_api_key()
-                    if api_key:
-                        st.success(f"Key found: {api_key[:15]}...")
-                        # Test client creation
-                        test_client = Groq(api_key=api_key)
-                        st.success("✅ Client created successfully!")
-                    else:
-                        st.error("❌ No API key found")
-                except Exception as e:
-                    st.error(f"❌ Error: {str(e)}")
+            with col1:
+                # Neural network visualization
+                st.markdown("#### 🧠 Neural Activity")
+                activity_level = min(1.0, len(st.session_state.messages) / 10.0)
+                neural_viz = self.animations.create_neural_network_viz(activity_level)
+                st.plotly_chart(neural_viz, use_container_width=True, config={'displayModeBar': False})
+            
+            with col2:
+                # System metrics
+                st.markdown("#### 📊 System Metrics")
+                
+                # Simulated system stats
+                import random
+                cpu_usage = random.randint(20, 80)
+                memory_usage = random.randint(30, 70)
+                network_activity = random.randint(10, 90)
+                
+                st.progress(cpu_usage / 100, text=f"CPU: {cpu_usage}%")
+                st.progress(memory_usage / 100, text=f"Memory: {memory_usage}%")
+                st.progress(network_activity / 100, text=f"Network: {network_activity}%")
     
-    # Main chat interface
-    st.subheader("💬 Chat with JARVIS")
+    def render_welcome_screen(self):
+        """Render welcome screen for new users"""
+        if not st.session_state.messages:
+            st.markdown("""
+            <div style="
+                text-align: center;
+                padding: 40px;
+                background: linear-gradient(45deg, rgba(0,255,255,0.1), rgba(255,107,53,0.1));
+                border-radius: 20px;
+                margin: 20px 0;
+                border: 1px solid rgba(0,255,255,0.3);
+            ">
+                <h2 style="color: #00ffff; font-family: 'Orbitron', monospace;">
+                    Welcome to JARVIS
+                </h2>
+                <p style="color: white; font-size: 1.1rem; margin: 20px 0;">
+                    Your advanced AI assistant is online and ready to help.
+                </p>
+                <div style="
+                    display: flex;
+                    justify-content: center;
+                    gap: 20px;
+                    margin: 30px 0;
+                ">
+                    <div style="color: #00ffff;">🧠 Intelligent Responses</div>
+                    <div style="color: #ff6b35;">⚡ Lightning Fast</div>
+                    <div style="color: #ffd700;">🎯 Always Available</div>
+                </div>
+                <p style="color: rgba(255,255,255,0.7);">
+                    Try asking me about technology, science, problem-solving, or just have a conversation!
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Sample questions
+            st.markdown("#### 💡 Try these sample questions:")
+            
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                if st.button("🤖 What is AI?", use_container_width=True):
+                    st.session_state.quick_query = "What is artificial intelligence and how does it work?"
+            
+            with col2:
+                if st.button("🚀 Future Tech", use_container_width=True):
+                    st.session_state.quick_query = "What are the most exciting future technology trends?"
+            
+            with col3:
+                if st.button("⚡ Arc Reactor", use_container_width=True):
+                    st.session_state.quick_query = "How does Tony Stark's arc reactor work?"
     
-    # Display messages
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+    def run(self):
+        """Main application runner"""
+        # Apply custom styling
+        self.ui.apply_custom_css()
+        
+        # Render matrix background effect (if animations enabled)
+        if JarvisConfig.ENABLE_ANIMATIONS:
+            self.animations.render_matrix_rain()
+        
+        # Main layout
+        self.render_header()
+        
+        # Create main columns
+        main_col, monitor_col = st.columns([3, 1])
+        
+        with main_col:
+            # Welcome screen or chat
+            if not st.session_state.messages:
+                self.render_welcome_screen()
+            
+            # Main chat interface
+            self.render_main_chat()
+        
+        with monitor_col:
+            # System monitoring
+            self.render_system_monitor()
+        
+        # Render sidebar
+        self.render_sidebar()
+        
+        # Footer
+        self.render_footer()
     
-    # Handle quick queries
-    if hasattr(st.session_state, 'quick_query'):
-        prompt = st.session_state.quick_query
-        del st.session_state.quick_query
+    def render_footer(self):
+        """Render application footer"""
+        st.markdown("---")
+        st.markdown("""
+        <div style="
+            text-align: center;
+            color: rgba(255,255,255,0.5);
+            font-family: 'Rajdhani', sans-serif;
+            padding: 20px 0;
+        ">
+            <p>🤖 JARVIS AI Assistant v1.0 | Powered by Groq Lightning Inference</p>
+            <p>Built with ❤️ using Streamlit | Iron Man Inspired Design</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+def main():
+    """Main application entry point"""
+    try:
+        # Initialize and run JARVIS app
+        app = JarvisApp()
+        app.run()
         
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
+    except Exception as e:
+        st.error(f"Application Error: {str(e)}")
+        st.error("Please refresh the page or contact support if the problem persists.")
         
-        with st.chat_message("assistant"):
-            with st.spinner("JARVIS is thinking..."):
-                response = st.session_state.jarvis.process_query(prompt)
-                st.markdown(response)
-        
-        st.session_state.messages.append({"role": "assistant", "content": response})
-        st.rerun()
-    
-    # Chat input
-    if prompt := st.chat_input("Ask JARVIS anything..."):
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
-        
-        with st.chat_message("assistant"):
-            with st.spinner("JARVIS is thinking..."):
-                response = st.session_state.jarvis.process_query(prompt)
-                st.markdown(response)
-        
-        st.session_state.messages.append({"role": "assistant", "content": response})
+        # Show error details in expander
+        with st.expander("🔧 Error Details"):
+            st.code(str(e))
 
 if __name__ == "__main__":
     main()
