@@ -3,6 +3,7 @@ import streamlit as st
 import datetime
 import random
 from groq import Groq
+import os
 
 # Page configuration
 st.set_page_config(
@@ -42,14 +43,11 @@ class IntentClassifier:
         }
     
     def classify(self, user_input):
-        """Classify user input intent"""
         user_input_lower = user_input.lower().strip()
-        
         for intent, keywords in self.intent_keywords.items():
             for keyword in keywords:
                 if keyword in user_input_lower:
                     return intent
-        
         return 'complex'
 
 class BuiltinResponses:
@@ -70,7 +68,6 @@ class BuiltinResponses:
         }
     
     def get_response(self, user_input, intent):
-        """Get appropriate built-in response"""
         if intent == 'time':
             return self._get_current_time()
         elif intent == 'date':
@@ -81,85 +78,101 @@ class BuiltinResponses:
             return "I'm processing your request. Please wait a moment."
     
     def _get_current_time(self):
-        """Get current time"""
         now = datetime.datetime.now()
         time_str = now.strftime('%I:%M %p')
         return f"The current time is {time_str}, sir."
     
     def _get_current_date(self):
-        """Get current date"""
         now = datetime.datetime.now()
         date_str = now.strftime('%A, %B %d, %Y')
         return f"Today is {date_str}."
 
 class GroqHandler:
     def __init__(self):
-        """Initialize Groq client with API key"""
         self.client = None
         self.api_connected = False
+        self.connection_error = None
         
-        try:
-            # Try to get API key from Streamlit secrets first
-            api_key = None
-            
+        # Get API key with multiple fallback methods
+        api_key = self._get_api_key()
+        
+        if api_key:
             try:
-                api_key = st.secrets["GROQ_API_KEY"]
-                st.sidebar.info("🔑 Using API key from Streamlit secrets")
-            except:
-                # Fallback: Use the key temporarily (ONLY FOR TESTING)
-                # ⚠️ Replace this with your NEW key after revoking the old one
-                api_key = "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"
-                st.sidebar.warning("⚠️ Using hardcoded API key (not recommended)")
-            
-            if not api_key or len(api_key) < 10:
-                raise ValueError("Invalid or missing API key")
-            
-            # Initialize Groq client
-            self.client = Groq(api_key=api_key)
-            self.model = "llama2-70b-4096"
-            
-            # Test connection
-            self._test_connection()
-            self.api_connected = True
-            
-        except Exception as e:
-            st.sidebar.error(f"❌ Groq API Error: {str(e)}")
-            self.client = None
+                # Initialize Groq client
+                self.client = Groq(api_key=api_key)
+                self.model = "llama2-70b-4096"
+                
+                # Test the connection
+                self._test_connection()
+                self.api_connected = True
+                
+            except Exception as e:
+                self.connection_error = str(e)
+                self.api_connected = False
+        else:
+            self.connection_error = "No API key found"
             self.api_connected = False
     
-    def _test_connection(self):
-        """Test API connection"""
+    def _get_api_key(self):
+        """Get API key from multiple sources"""
+        api_key = None
+        
+        # Method 1: Streamlit secrets
         try:
-            test_response = self.client.chat.completions.create(
+            api_key = st.secrets["GROQ_API_KEY"]
+            if api_key and len(api_key) > 20:
+                return api_key
+        except:
+            pass
+        
+        # Method 2: Environment variable
+        try:
+            api_key = os.environ.get("GROQ_API_KEY")
+            if api_key and len(api_key) > 20:
+                return api_key
+        except:
+            pass
+        
+        # Method 3: Temporary hardcoded (REPLACE WITH YOUR NEW KEY)
+        # ⚠️ Remember to revoke the old exposed key and create a new one!
+        api_key = "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"
+        
+        return api_key
+    
+    def _test_connection(self):
+        """Test API connection with a simple call"""
+        try:
+            response = self.client.chat.completions.create(
                 messages=[{"role": "user", "content": "Hi"}],
                 model=self.model,
-                max_tokens=5
+                max_tokens=5,
+                temperature=0.1
             )
-            st.sidebar.success("✅ Groq API Connected!")
             return True
         except Exception as e:
-            raise Exception(f"API test failed: {str(e)}")
+            raise Exception(f"Connection test failed: {str(e)}")
     
     def get_response(self, user_input, conversation_history=[]):
         """Get AI response from Groq"""
-        if not self.client or not self.api_connected:
-            return "❌ I'm not connected to my AI brain. Please check the API configuration."
+        # Check if we're connected
+        if not self.api_connected or not self.client:
+            return f"🔧 Connection Issue: {self.connection_error}. Please check your API key setup."
         
         try:
-            # Build messages with context
+            # Build conversation messages
             messages = [
                 {
                     "role": "system",
                     "content": """You are JARVIS, Tony Stark's AI assistant from Iron Man. 
                     You are helpful, intelligent, witty, and professional. 
                     You have a slight British accent in your tone.
-                    You're great at explaining technology and complex topics in simple terms.
+                    You're excellent at explaining technology and complex topics in simple terms.
                     Keep responses conversational but informative.
-                    Address the user respectfully."""
+                    Always be respectful and helpful."""
                 }
             ]
             
-            # Add conversation history for context
+            # Add recent conversation history
             for conv in conversation_history[-3:]:
                 messages.append({"role": "user", "content": conv['user']})
                 messages.append({"role": "assistant", "content": conv['assistant']})
@@ -167,22 +180,20 @@ class GroqHandler:
             # Add current query
             messages.append({"role": "user", "content": user_input})
             
-            # Make API call to Groq
-            with st.spinner("JARVIS is thinking..."):
-                chat_completion = self.client.chat.completions.create(
-                    messages=messages,
-                    model=self.model,
-                    max_tokens=500,
-                    temperature=0.7,
-                    top_p=1,
-                    stream=False
-                )
+            # Make API call
+            chat_completion = self.client.chat.completions.create(
+                messages=messages,
+                model=self.model,
+                max_tokens=500,
+                temperature=0.7,
+                top_p=1
+            )
             
             response = chat_completion.choices[0].message.content
             return response
             
         except Exception as e:
-            return f"I apologize, but I'm experiencing technical difficulties: {str(e)}"
+            return f"I'm experiencing technical difficulties: {str(e)}. Please try again."
 
 class JarvisBrain:
     def __init__(self):
@@ -192,7 +203,6 @@ class JarvisBrain:
         self.conversation_history = []
     
     def process_query(self, user_input):
-        """Main query processing method"""
         try:
             user_input = user_input.strip()
             if not user_input:
@@ -205,6 +215,7 @@ class JarvisBrain:
             if intent in ['time', 'date', 'greeting', 'simple']:
                 response = self.builtin.get_response(user_input, intent)
             else:
+                # Use Groq for complex queries
                 response = self.groq.get_response(user_input, self.conversation_history)
             
             # Update conversation history
@@ -214,36 +225,24 @@ class JarvisBrain:
                 'intent': intent
             })
             
-            # Keep only last 10 exchanges
+            # Keep last 10 exchanges
             if len(self.conversation_history) > 10:
                 self.conversation_history = self.conversation_history[-10:]
             
-            return self._format_response(response)
+            return response
             
         except Exception as e:
             return f"I encountered an error: {str(e)}"
-    
-    def _format_response(self, response):
-        """Format response for better display"""
-        if not response:
-            return "I apologize, but I couldn't generate a proper response."
-        
-        response = response.strip()
-        
-        if not response.endswith(('.', '!', '?', ':')):
-            response += '.'
-        
-        return response
 
 def main():
-    # Initialize JARVIS in session state
+    # Initialize JARVIS
     if 'jarvis' not in st.session_state:
         st.session_state.jarvis = JarvisBrain()
     
     if 'messages' not in st.session_state:
         st.session_state.messages = []
     
-    # Title and description
+    # Title
     st.title("🤖 JARVIS AI Assistant")
     st.markdown("*Just A Rather Very Intelligent System*")
     
@@ -251,57 +250,61 @@ def main():
     with st.sidebar:
         st.header("🛠️ JARVIS Controls")
         
-        # API Status
+        # Connection status
         st.subheader("📡 System Status")
         
-        # Show API key status
-        try:
-            if hasattr(st.session_state.jarvis.groq, 'api_connected') and st.session_state.jarvis.groq.api_connected:
+        if hasattr(st.session_state.jarvis.groq, 'api_connected'):
+            if st.session_state.jarvis.groq.api_connected:
                 st.success("✅ AI Brain Online")
-                st.info("🧠 Powered by Groq Llama 2")
+                st.info("🧠 Groq Llama 2 70B Active")
             else:
                 st.error("❌ AI Brain Offline")
-        except:
-            st.warning("⚠️ Checking AI connection...")
+                if st.session_state.jarvis.groq.connection_error:
+                    st.error(f"Error: {st.session_state.jarvis.groq.connection_error}")
+                
+                # Debug info
+                st.subheader("🔧 Debug Info")
+                if st.button("🧪 Test API Key"):
+                    try:
+                        test_key = st.session_state.jarvis.groq._get_api_key()
+                        if test_key:
+                            st.info(f"Key found: {test_key[:20]}...")
+                            # Try to create client
+                            test_client = Groq(api_key=test_key)
+                            st.success("Client created successfully!")
+                        else:
+                            st.error("No API key found")
+                    except Exception as e:
+                        st.error(f"Test failed: {str(e)}")
         
         # Message count
-        st.metric("💬 Conversation", len(st.session_state.messages))
+        st.metric("💬 Messages", len(st.session_state.messages))
         
         # Clear chat
         if st.button("🗑️ Clear Chat", use_container_width=True):
             st.session_state.messages = []
             st.session_state.jarvis.conversation_history = []
-            st.success("Chat cleared!")
             st.rerun()
         
         # Quick commands
         st.subheader("⚡ Quick Commands")
         
-        col1, col2 = st.columns(2)
+        if st.button("👋 Hello JARVIS", use_container_width=True):
+            st.session_state.quick_query = "Hello JARVIS"
         
-        with col1:
-            if st.button("👋 Hello", use_container_width=True):
-                st.session_state.quick_query = "Hello JARVIS"
+        if st.button("⏰ What time is it?", use_container_width=True):
+            st.session_state.quick_query = "What time is it?"
             
-            if st.button("⏰ Time", use_container_width=True):
-                st.session_state.quick_query = "What time is it?"
-        
-        with col2:
-            if st.button("🤖 About AI", use_container_width=True):
-                st.session_state.quick_query = "What is artificial intelligence?"
+        if st.button("🤖 What is AI?", use_container_width=True):
+            st.session_state.quick_query = "What is artificial intelligence?"
             
-            if st.button("🔬 Explain Tech", use_container_width=True):
-                st.session_state.quick_query = "How do computers work?"
-        
-        # Usage info
-        st.subheader("📊 Usage Info")
-        st.info("Free tier: 100k tokens/day")
-        st.caption("Powered by Groq's lightning-fast inference")
+        if st.button("🔬 How do computers work?", use_container_width=True):
+            st.session_state.quick_query = "How do computers work?"
     
-    # Main chat interface
+    # Main chat
     st.subheader("💬 Chat with JARVIS")
     
-    # Display chat messages
+    # Display messages
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
@@ -311,30 +314,28 @@ def main():
         prompt = st.session_state.quick_query
         del st.session_state.quick_query
         
-        # Add user message
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
         
-        # Get JARVIS response
         with st.chat_message("assistant"):
-            response = st.session_state.jarvis.process_query(prompt)
-            st.markdown(response)
+            with st.spinner("JARVIS is processing..."):
+                response = st.session_state.jarvis.process_query(prompt)
+                st.markdown(response)
         
         st.session_state.messages.append({"role": "assistant", "content": response})
         st.rerun()
     
     # Chat input
     if prompt := st.chat_input("Ask JARVIS anything..."):
-        # Add user message
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
         
-        # Get JARVIS response
         with st.chat_message("assistant"):
-            response = st.session_state.jarvis.process_query(prompt)
-            st.markdown(response)
+            with st.spinner("JARVIS is processing..."):
+                response = st.session_state.jarvis.process_query(prompt)
+                st.markdown(response)
         
         st.session_state.messages.append({"role": "assistant", "content": response})
 
